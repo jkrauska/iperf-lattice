@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "asyncssh>=2.17",
-#   "pyyaml>=6.0",
-#   "rich>=13.7",
-# ]
-# ///
 """
 iperf-lattice-discover — pre-flight check for iperf-lattice.
 
@@ -33,20 +25,10 @@ from pathlib import Path
 from typing import Any
 
 import asyncssh
-import yaml
 from rich.console import Console
 from rich.table import Table
 
-# ---------- data model ----------
-
-
-@dataclass
-class Node:
-    name: str
-    host: str
-    test_addr: str
-    user: str | None = None  # defaults to current OS user (like ssh)
-    ssh_port: int = 22
+from iperf_lattice_common import Node, load_hosts, ssh_connect, ssh_run
 
 
 @dataclass
@@ -68,75 +50,6 @@ class NodeDiscovery:
     lldp_error: str = ""
     neighbors: list[LldpNeighbor] | None = None
     ssh_error: str = ""
-
-
-# ---------- inventory ----------
-
-
-def load_hosts(path: Path) -> list[Node]:
-    """Load a YAML hosts file.
-
-    Accepts two shapes:
-
-      # Simple — flat list of hostnames / IPs
-      - c1
-      - c2
-
-      # Advanced — dict with optional defaults and per-node overrides
-      defaults:
-        user: jdoe
-      nodes:
-        - name: c1
-          host: 10.0.0.1
-    """
-    data = yaml.safe_load(path.read_text())
-    if data is None:
-        sys.exit(f"Empty hosts file: {path}")
-
-    nodes: list[Node] = []
-
-    if isinstance(data, list):
-        for entry in data:
-            name = str(entry)
-            nodes.append(Node(name=name, host=name, test_addr=name))
-    elif isinstance(data, dict):
-        defaults = data.get("defaults", {})
-        for entry in data.get("nodes", []):
-            merged = {**defaults, **entry}
-            nodes.append(
-                Node(
-                    name=merged["name"],
-                    host=merged["host"],
-                    test_addr=merged.get("test_addr", merged["host"]),
-                    user=merged.get("user"),
-                    ssh_port=merged.get("ssh_port", 22),
-                )
-            )
-    else:
-        sys.exit(f"Unexpected YAML structure in {path} (expected list or dict)")
-
-    if not nodes:
-        sys.exit("No nodes found in hosts file.")
-    return nodes
-
-
-# ---------- SSH helpers ----------
-
-
-async def ssh_connect(node: Node) -> asyncssh.SSHClientConnection:
-    kwargs: dict[str, Any] = {
-        "host": node.host,
-        "port": node.ssh_port,
-        "known_hosts": None,
-        "keepalive_interval": 15,
-    }
-    if node.user:
-        kwargs["username"] = node.user
-    return await asyncssh.connect(**kwargs)
-
-
-async def ssh_run(conn: asyncssh.SSHClientConnection, cmd: str, timeout: float = 30) -> asyncssh.SSHCompletedProcess:
-    return await conn.run(cmd, check=False, timeout=timeout)
 
 
 # ---------- LLDP parsing ----------
@@ -274,9 +187,8 @@ def print_topology(discoveries: list[NodeDiscovery], console: Console) -> None:
     table.add_column("VLAN")
 
     for d in has_lldp:
-        for i, n in enumerate(d.neighbors):  # type: ignore[union-attr]
-            label = d.name
-            table.add_row(label, n.local_port, n.remote_system, n.remote_port, n.remote_descr, n.vlan)
+        for n in d.neighbors:  # type: ignore[union-attr]
+            table.add_row(d.name, n.local_port, n.remote_system, n.remote_port, n.remote_descr, n.vlan)
 
     console.print(table)
 

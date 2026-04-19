@@ -9,7 +9,9 @@ oversubscribed uplinks, or LAG hash collisions.
 | Command | Purpose |
 |------------------------------|----------------------------------------------|
 | `iperf-lattice-discover`     | Pre-flight: verify iperf3, run `lldpctl`, show topology |
+| `iperf-lattice-install`      | Install iperf3 on all hosts (Debian/Ubuntu via apt) |
 | `iperf-lattice --mode matrix`| Sequential pair-by-pair tests (one flow at a time) |
+| `iperf-lattice --mode matrix --concurrent` | Parallel non-overlapping pairs per round |
 | `iperf-lattice --mode flood` | Simultaneous NxN all-to-all with synchronized start |
 
 ## Requirements
@@ -25,6 +27,8 @@ oversubscribed uplinks, or LAG hash collisions.
 - `lldpd` / `lldpctl` for discovery (optional but recommended)
 - SSH access from the orchestrator (key-based auth recommended)
 - Firewall open on the port range (default 5201+, one port per incoming pair in flood mode)
+- NTP or similar time sync — flood mode uses a synchronized epoch start across
+  nodes, so clocks must agree within a few seconds (see below)
 
 ## Quickstart
 
@@ -105,7 +109,8 @@ Exit code `0` if all nodes have SSH + iperf3; `1` otherwise.
 usage: iperf_lattice.py [-h] --hosts HOSTS --mode {matrix,flood}
                         [--duration DURATION] [--omit OMIT]
                         [--parallel PARALLEL] [--base-port BASE_PORT]
-                        [--json-out JSON_OUT] [--fail-fast]
+                        [--json-out JSON_OUT] [--timeout TIMEOUT]
+                        [--fail-fast] [--concurrent]
 
 options:
   --hosts HOSTS         YAML hosts file (list of names or advanced dict)
@@ -115,10 +120,55 @@ options:
   --parallel PARALLEL   iperf3 -P streams per pair (default 8)
   --base-port BASE_PORT First iperf3 server port (default 5201)
   --json-out JSON_OUT   Path to write full JSON results
+  --timeout TIMEOUT     SSH command timeout per test in seconds (default: duration + omit + 30)
   --fail-fast           Stop on first error (matrix mode)
+  --concurrent          Matrix mode: run non-overlapping pairs in parallel
 ```
 
 Exit code `0` if all pairs succeeded, `2` if any pair had an error.
+
+#### `--concurrent` (matrix mode)
+
+By default, matrix mode runs one pair at a time. With `--concurrent`, pairs are
+scheduled into rounds where no node appears more than once, and all pairs within
+a round run simultaneously. This dramatically speeds up large-cluster matrix runs
+while still keeping results attributable (each node is only in one flow per round).
+
+### Clock synchronization (flood mode)
+
+Flood mode schedules all iperf3 clients to start at the same wall-clock instant
+by computing a future epoch timestamp on the orchestrator and sleeping on each
+remote node until that time arrives. This requires clocks on all nodes to be
+reasonably synchronized (within ~2 seconds).
+
+If NTP or PTP is not running, some clients may start immediately (their clock is
+ahead) while others sleep too long (clock is behind), skewing the measurement
+window. Most Linux systems run `systemd-timesyncd` or `chrony` by default, but
+it's worth verifying:
+
+```bash
+# Check NTP sync status on each node
+timedatectl status | grep -i sync
+# or
+chronyc tracking
+```
+
+Matrix mode does not depend on clock sync — tests are sequenced by the
+orchestrator over SSH.
+
+### Choosing `--duration`
+
+| Duration | Use case | Trade-off |
+|----------|----------|-----------|
+| 5s | Quick smoke test | Warmup noise dominates; misses intermittent issues |
+| 10s | Fast iteration | May miss bursty congestion or thermal throttling |
+| **20–30s** | **Routine fabric validation** | **Recommended.** Steady-state TCP, meaningful retransmit rates |
+| 60s | Chasing intermittent issues | Good for PFC storms, thermal throttling |
+| 120s+ | Burn-in / soak testing | Only needed for rare or load-dependent issues |
+
+The `--omit` flag (default 3s) excludes TCP ramp-up from the measurements, so
+the effective measurement window is `duration - omit` seconds. A 4-node cluster
+(12 pairs) at `--duration 20` completes a matrix run in about 4 minutes.
 
 ## Interpreting results
 
