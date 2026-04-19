@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
+# Run a full batch of iperf-lattice tests (matrix, matrix-concurrent, flood).
+#
+# To run in the background with output logged to a file:
+#   nohup bash run_batch.sh 2>&1 | tee results/batch-$(date -u +%Y%m%d-%H%M%S).log &
+#
+# To resume watching a backgrounded run:
+#   tail -f results/batch-*.log
+
 set -euo pipefail
+trap 'echo ""; echo "Interrupted."; exit 130' INT
 
 HOSTS="hosts.yaml"
 DURATION=120
