@@ -1,0 +1,22 @@
+# Example list of test nodes
+# - c1 used as a controller node
+nodes:
+  - name: c2
+    host: c2
+    test_addr: 192.168.200.2
+  - name: c3
+    host: c3
+    test_addr: 192.168.200.3
+  - name: c4
+    host: c4
+    test_addr: 192.168.200.4
+  - name: c5
+    host: c5
+    test_addr: 192.168.200.5
+  # - name: c6
+  #   host: c6
+  #   test_addr: 192.168.200.6
+  # - name: c7
+  #   host: c7
+  #   test_addr: 192.168.200.7
+  
